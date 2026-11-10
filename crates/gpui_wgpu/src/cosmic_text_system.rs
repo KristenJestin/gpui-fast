@@ -21,7 +21,7 @@ use swash::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-pub struct CosmicTextSystem(RwLock<CosmicTextSystemState>);
+pub struct CosmicTextSystem(pub(crate) crate::fast::font_scan::FontScan);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct FontKey {
@@ -46,8 +46,8 @@ struct LoadedFontKey {
     font: FontKey,
 }
 
-struct CosmicTextSystemState {
-    font_system: FontSystem,
+pub(crate) struct CosmicTextSystemState {
+    pub(crate) font_system: FontSystem,
     scratch: ShapeBuffer,
     swash_scale_context: ScaleContext,
     pending_glyph_images: HashMap<RenderGlyphParams, swash::scale::image::Image>,
@@ -58,7 +58,7 @@ struct CosmicTextSystemState {
     /// for every font face in a family.
     font_ids_by_family_cache: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     system_font_fallback: String,
-    missing_glyph_sink: Option<Arc<dyn MissingGlyphSink>>,
+    pub(crate) missing_glyph_sink: Option<Arc<dyn MissingGlyphSink>>,
 }
 
 struct LoadedFont {
@@ -129,9 +129,9 @@ impl CosmicTextSystem {
     }
 
     pub fn new(system_font_fallback: &str) -> Self {
-        let font_system = FontSystem::new();
+        let font_system = crate::fast::font_scan::empty_font_system();
 
-        Self(RwLock::new(CosmicTextSystemState {
+        let fast_state = RwLock::new(CosmicTextSystemState {
             font_system,
             scratch: ShapeBuffer::default(),
             swash_scale_context: ScaleContext::new(),
@@ -141,7 +141,8 @@ impl CosmicTextSystem {
             font_ids_by_family_cache: HashMap::default(),
             system_font_fallback: system_font_fallback.to_string(),
             missing_glyph_sink: None,
-        }))
+        });
+        Self(crate::fast::font_scan::FontScan::system_fonts(fast_state))
     }
 
     pub fn new_without_system_fonts(system_font_fallback: &str) -> Self {
@@ -150,7 +151,7 @@ impl CosmicTextSystem {
             cosmic_text::fontdb::Database::new(),
         );
 
-        Self(RwLock::new(CosmicTextSystemState {
+        let fast_state = RwLock::new(CosmicTextSystemState {
             font_system,
             scratch: ShapeBuffer::default(),
             swash_scale_context: ScaleContext::new(),
@@ -160,17 +161,18 @@ impl CosmicTextSystem {
             font_ids_by_family_cache: HashMap::default(),
             system_font_fallback: system_font_fallback.to_string(),
             missing_glyph_sink: None,
-        }))
+        });
+        Self(crate::fast::font_scan::FontScan::ready(fast_state))
     }
 }
 
 impl PlatformTextSystem for CosmicTextSystem {
     fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
-        self.0.write().add_fonts(fonts)
+        crate::fast::font_scan::add_fonts(&self.0, fonts)
     }
 
     fn set_missing_glyph_sink(&self, sink: Option<Arc<dyn MissingGlyphSink>>) {
-        self.0.write().missing_glyph_sink = sink;
+        crate::fast::font_scan::set_missing_glyph_sink(&self.0, sink);
     }
 
     fn all_font_names(&self) -> Vec<String> {
@@ -326,7 +328,7 @@ impl CosmicTextSystemState {
     }
 
     #[profiling::function]
-    fn add_fonts(&mut self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
+    pub(crate) fn add_fonts(&mut self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()> {
         self.font_ids_by_family_cache.clear();
         let db = self.font_system.db_mut();
         for bytes in fonts {
