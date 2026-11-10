@@ -16,3 +16,5 @@ pub(crate) mod globals;
 pub(crate) mod layers;
 pub(crate) mod pass_state;
 pub(crate) mod rounded_clip;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod vulkan_first;
