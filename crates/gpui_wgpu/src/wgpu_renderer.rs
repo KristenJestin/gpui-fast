@@ -301,6 +301,12 @@ impl WgpuRenderer {
     where
         W: HasWindowHandle + HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
     {
+        let fast_vulkan_first =
+            crate::fast::vulkan_first::new_renderer(&gpu_context, window, config, compositor_gpu);
+        let config = match fast_vulkan_first? {
+            std::ops::ControlFlow::Break(fast_renderer) => return Ok(fast_renderer),
+            std::ops::ControlFlow::Continue(config) => config,
+        };
         let window_handle = window
             .window_handle()
             .map_err(|e| anyhow::anyhow!("Failed to get window handle: {e}"))?;

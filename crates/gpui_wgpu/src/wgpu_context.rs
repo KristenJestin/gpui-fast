@@ -294,7 +294,7 @@ impl WgpuContext {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    fn from_native_adapter_and_device(
+    pub(crate) fn from_native_adapter_and_device(
         instance: wgpu::Instance,
         adapter: wgpu::Adapter,
         device: wgpu::Device,
@@ -325,7 +325,7 @@ impl WgpuContext {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    fn device_id_filter() -> Option<u32> {
+    pub(crate) fn device_id_filter() -> Option<u32> {
         match std::env::var("ZED_DEVICE_ID") {
             Ok(value) => parse_pci_id(&value)
                 .context("Failed to parse device ID from `ZED_DEVICE_ID` environment variable")
@@ -603,7 +603,7 @@ impl WgpuContext {
     ///    "Other" ranks above "Virtual" because OpenGL seems to count as "Other".
     /// 4. Backend — prefer Vulkan/Metal/Dx12 over GL/etc.
     #[cfg(not(target_family = "wasm"))]
-    fn sort_adapters(
+    pub(crate) fn sort_adapters(
         adapters: &mut [wgpu::Adapter],
         device_id_filter: Option<u32>,
         compositor_gpu: Option<&CompositorGpuHint>,
@@ -651,7 +651,7 @@ impl WgpuContext {
     /// Try to use an adapter with a surface by creating a device and testing configuration.
     /// Returns the device and queue if successful, allowing them to be reused.
     #[cfg(not(target_family = "wasm"))]
-    async fn try_adapter_with_surface(
+    pub(crate) async fn try_adapter_with_surface(
         adapter: &wgpu::Adapter,
         surface: &wgpu::Surface<'_>,
         config: &WgpuSurfaceConfig,
