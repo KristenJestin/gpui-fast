@@ -645,7 +645,9 @@ impl WgpuContext {
         adapter: &wgpu::Adapter,
         surface: &wgpu::Surface<'_>,
     ) -> anyhow::Result<(wgpu::Device, wgpu::Queue, bool, TextureFormat)> {
-        let caps = surface.get_capabilities(adapter);
+        let caps = crate::timing::time("wgpu: adapter surface capabilities", || {
+            surface.get_capabilities(adapter)
+        });
         if caps.formats.is_empty() {
             anyhow::bail!("no compatible surface formats");
         }
@@ -653,8 +655,10 @@ impl WgpuContext {
             anyhow::bail!("no compatible alpha modes");
         }
 
-        let (device, queue, dual_source_blending, color_atlas_texture_format) =
-            Self::create_device(adapter).await?;
+        let begun = std::time::Instant::now();
+        let device = Self::create_device(adapter).await;
+        crate::timing::span("wgpu: request_device", begun.elapsed());
+        let (device, queue, dual_source_blending, color_atlas_texture_format) = device?;
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
         let test_config = wgpu::SurfaceConfiguration {
@@ -669,9 +673,13 @@ impl WgpuContext {
             view_formats: vec![],
         };
 
-        surface.configure(&device, &test_config);
+        crate::timing::time("wgpu: test configure of the surface (64x64)", || {
+            surface.configure(&device, &test_config)
+        });
 
+        let begun = std::time::Instant::now();
         let error = error_scope.pop().await;
+        crate::timing::span("wgpu: error scope popped", begun.elapsed());
         if let Some(e) = error {
             anyhow::bail!("surface configuration failed: {e}");
         }

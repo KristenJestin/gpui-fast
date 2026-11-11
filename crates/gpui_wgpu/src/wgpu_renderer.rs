@@ -387,7 +387,9 @@ impl WgpuRenderer {
         compositor_gpu: Option<CompositorGpuHint>,
         atlas: Arc<WgpuAtlas>,
     ) -> anyhow::Result<Self> {
-        let surface_caps = surface.get_capabilities(&context.adapter);
+        let surface_caps = crate::timing::time("wgpu: surface capabilities", || {
+            surface.get_capabilities(&context.adapter)
+        });
         let preferred_formats = [
             wgpu::TextureFormat::Bgra8Unorm,
             wgpu::TextureFormat::Rgba8Unorm,
@@ -474,9 +476,13 @@ impl WgpuRenderer {
         };
         // Configure the surface immediately. The adapter selection process already validated
         // that this adapter can successfully configure this surface.
-        surface.configure(&context.device, &surface_config);
+        crate::timing::time("wgpu: surface configured", || {
+            surface.configure(&context.device, &surface_config)
+        });
 
-        let core = WgpuRendererCore::new(context, atlas.clone(), surface_format, alpha_mode);
+        let core = crate::timing::time("wgpu: renderer core made (all of it)", || {
+            WgpuRendererCore::new(context, atlas.clone(), surface_format, alpha_mode)
+        });
 
         Ok(Self {
             context: gpu_context,
@@ -707,16 +713,23 @@ impl WgpuRendererCore {
         } else {
             STORAGE_BUFFER_SHADERS
         };
-        let shader_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gpui_shaders"),
-            source: crate::fast::rounded_clip::shader_source(shader_source),
+        let shader_module = crate::timing::time("wgpu: shader module gpui_shaders", || {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("gpui_shaders"),
+                source: crate::fast::rounded_clip::shader_source(shader_source),
+            })
         });
 
         let subpixel_shader_module = if dual_source_blending {
-            Some(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("gpui_subpixel_shaders"),
-                source: crate::fast::rounded_clip::shader_source(SUBPIXEL_SHADERS),
-            }))
+            Some(crate::timing::time(
+                "wgpu: shader module gpui_subpixel_shaders",
+                || {
+                    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("gpui_subpixel_shaders"),
+                        source: crate::fast::rounded_clip::shader_source(SUBPIXEL_SHADERS),
+                    })
+                },
+            ))
         } else {
             None
         };
@@ -753,7 +766,8 @@ impl WgpuRendererCore {
                 immediate_size: 0,
             });
 
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            let begun = std::time::Instant::now();
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(name),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
@@ -785,7 +799,11 @@ impl WgpuRendererCore {
                 },
                 multiview_mask: None,
                 cache: None,
-            })
+            });
+            if crate::timing::on() {
+                crate::timing::span(format!("wgpu: render pipeline {name}"), begun.elapsed());
+            }
+            pipeline
         };
 
         let quads = create_pipeline(
@@ -1171,7 +1189,12 @@ impl WgpuRenderer {
             self.failed_frame_count = 0;
         }
 
-        let frame = match surface.get_current_texture() {
+        let begun = std::time::Instant::now();
+        let current_texture = surface.get_current_texture();
+        if crate::timing::on() {
+            crate::timing::span("wgpu: frame: get_current_texture", begun.elapsed());
+        }
+        let frame = match current_texture {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 // Textures must be destroyed before the surface can be reconfigured.
@@ -1203,18 +1226,22 @@ impl WgpuRenderer {
             .create_view(&wgpu::TextureViewDescriptor::default());
         let premultiplied_alpha =
             self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
-        if let Err(error) = core.render_frame(
-            scene,
-            &frame_view,
-            size,
-            premultiplied_alpha,
-            wgpu::Color::TRANSPARENT,
-        ) {
+        let rendered = crate::timing::time("wgpu: frame: render_frame (record and submit)", || {
+            core.render_frame(
+                scene,
+                &frame_view,
+                size,
+                premultiplied_alpha,
+                wgpu::Color::TRANSPARENT,
+            )
+        });
+        if let Err(error) = rendered {
             log::error!("{error:#}");
             return false;
         }
 
-        core.resources.queue.present(frame);
+        crate::timing::time("wgpu: frame: present", || core.resources.queue.present(frame));
+        crate::timing::presented();
         true
     }
 }
@@ -1232,7 +1259,9 @@ impl WgpuRendererCore {
         let uses_webgl_instance_data = context.uses_webgl_instance_data();
         let dual_source_blending =
             context.supports_dual_source_blending() && !uses_webgl_instance_data;
-        let bind_group_layouts = Self::create_bind_group_layouts(&device, uses_webgl_instance_data);
+        let bind_group_layouts = crate::timing::time("wgpu: bind group layouts", || {
+            Self::create_bind_group_layouts(&device, uses_webgl_instance_data)
+        });
         let pipelines = Self::create_pipelines(
             &device,
             &bind_group_layouts,

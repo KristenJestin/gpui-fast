@@ -585,7 +585,9 @@ impl WaylandWindowState {
                 // Prefer Mailbox to avoid blocking. Falls back to FIFO if Mailbox is unsupported.
                 preferred_present_mode: Some(wgpu::PresentMode::Mailbox),
             };
-            WgpuRenderer::new(gpu_context, &raw_window, config, compositor_gpu)?
+            gpui_wgpu::timing::time("wgpu: WgpuRenderer::new (all of it)", || {
+                WgpuRenderer::new(gpu_context, &raw_window, config, compositor_gpu)
+            })?
         };
 
         if let WaylandSurfaceState::Xdg(ref xdg_state) = surface_state {
@@ -857,6 +859,7 @@ impl WaylandWindow {
             popup_grab,
             target_output,
         )?;
+        gpui_wgpu::timing::mark("wayland: surface and its roles made");
 
         if let Some(fractional_scale_manager) = globals.fractional_scale_manager.as_ref() {
             fractional_scale_manager.get_fractional_scale(&surface, &globals.qh, surface.id());
@@ -1172,6 +1175,7 @@ impl WaylandWindowStatePtr {
             let initial_configure = self.frame_loop.get() == FrameLoop::Unconfigured;
             drop(state);
             if initial_configure {
+                gpui_wgpu::timing::mark("wayland: first configure handled, first frame requested");
                 self.frame(None, FrameRequestSource::NativeCallback);
             } else {
                 self.request_redraw();

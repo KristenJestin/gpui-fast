@@ -108,7 +108,9 @@ where
             // Kept until the context is made: a GL driver that shares its
             // libraries with the Vulkan driver (NVIDIA's) then finds them
             // loaded and initialized, as in an instance of both backends.
-            let vulkan = new_instance(wgpu::Backends::VULKAN, target.0);
+            let vulkan = super::timing::time("wgpu: Vulkan instance created", || {
+                new_instance(wgpu::Backends::VULKAN, target.0)
+            });
             match vulkan_context(&vulkan, target, &config, compositor_gpu.as_ref()) {
                 Ok(found) => found,
                 Err(VulkanMiss::GlAlone) => {
@@ -127,7 +129,9 @@ where
     // selection has configured the surface.
     let mut context_ref = gpu_context.borrow_mut();
     let context = context_ref.insert(context);
-    let atlas = Arc::new(WgpuAtlas::from_context(context));
+    let atlas = super::timing::time("wgpu: atlas created", || {
+        Arc::new(WgpuAtlas::from_context(context))
+    });
     WgpuRenderer::new_internal(
         Some(Rc::clone(gpu_context)),
         context,
@@ -177,13 +181,22 @@ where
 {
     // Without a Vulkan driver the instance has no backend to make a surface
     // with, and upstream's instance would have no Vulkan adapter.
-    let surface = create_surface(instance, target.1).map_err(|error| {
+    let surface = super::timing::time("wgpu: Vulkan surface created", || {
+        create_surface(instance, target.1)
+    })
+    .map_err(|error| {
         log::info!("No Vulkan surface: {error}");
         VulkanMiss::GlAlone
     })?;
-    let (adapter, device, queue, dual_source_blending, color_texture_format) = gpui::block_on(
-        select_vulkan_adapter(instance, &surface, config, compositor_gpu),
-    )?;
+    let (adapter, device, queue, dual_source_blending, color_texture_format) =
+        super::timing::time("wgpu: adapter chosen and device made (all of it)", || {
+            gpui::block_on(select_vulkan_adapter(
+                instance,
+                &surface,
+                config,
+                compositor_gpu,
+            ))
+        })?;
     let context = WgpuContext::from_native_adapter_and_device(
         instance.clone(),
         adapter,
@@ -206,10 +219,16 @@ fn context_in<W>(
 where
     W: HasDisplayHandle + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    let instance = new_instance(backends, target.0);
-    let surface = create_surface(&instance, target.1)
-        .map_err(|e| anyhow::anyhow!("Failed to create surface: {e}"))?;
-    let context = WgpuContext::new(instance, &surface, compositor_gpu)?;
+    let instance = super::timing::time("wgpu: fallback instance created", || {
+        new_instance(backends, target.0)
+    });
+    let surface = super::timing::time("wgpu: fallback surface created", || {
+        create_surface(&instance, target.1)
+    })
+    .map_err(|e| anyhow::anyhow!("Failed to create surface: {e}"))?;
+    let context = super::timing::time("wgpu: fallback context made", || {
+        WgpuContext::new(instance, &surface, compositor_gpu)
+    })?;
     Ok((context, surface))
 }
 
@@ -245,8 +264,10 @@ async fn select_vulkan_adapter(
     VulkanMiss,
 > {
     let device_id_filter = WgpuContext::device_id_filter();
+    let begun = std::time::Instant::now();
     let mut adapters = instance.enumerate_adapters(wgpu::Backends::VULKAN).await;
     WgpuContext::sort_adapters(&mut adapters, device_id_filter, compositor_gpu);
+    super::timing::span("wgpu: Vulkan adapters enumerated and ranked", begun.elapsed());
 
     log::info!("Found {} Vulkan adapter(s):", adapters.len());
     for adapter in &adapters {

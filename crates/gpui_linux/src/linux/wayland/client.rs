@@ -1291,6 +1291,8 @@ impl WaylandConnection {
         handle: AnyWindowHandle,
         params: WindowParams,
     ) -> anyhow::Result<Box<dyn PlatformWindow>> {
+        gpui_wgpu::timing::start();
+        gpui_wgpu::timing::mark("wayland: open_window entered");
         let mut state = self.0.borrow_mut();
 
         // Popups name their parent explicitly. Other kinds are parented to the focused window.
@@ -1347,6 +1349,7 @@ impl WaylandConnection {
             state.consume_startup_activation_token(&window.0.surface());
         }
         state.windows.insert(surface_id, window.0.clone());
+        gpui_wgpu::timing::mark("wayland: open_window returns");
 
         Ok(Box::new(window))
     }
