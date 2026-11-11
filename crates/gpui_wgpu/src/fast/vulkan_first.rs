@@ -133,7 +133,6 @@ where
         context,
         surface,
         config,
-        true,
         compositor_gpu,
         atlas,
     )
@@ -210,7 +209,7 @@ where
     let instance = new_instance(backends, target.0);
     let surface = create_surface(&instance, target.1)
         .map_err(|e| anyhow::anyhow!("Failed to create surface: {e}"))?;
-    let context = WgpuContext::new(instance, &surface, config, compositor_gpu)?;
+    let context = WgpuContext::new(instance, &surface, compositor_gpu)?;
     Ok((context, surface))
 }
 
@@ -277,7 +276,7 @@ async fn select_vulkan_adapter(
             continue;
         }
         log::info!("Testing adapter: {} ({:?})...", info.name, info.backend);
-        match WgpuContext::try_adapter_with_surface(&adapter, surface, config).await {
+        match WgpuContext::try_adapter_with_surface(&adapter, surface).await {
             Ok((device, queue, dual_source_blending, color_texture_format)) => {
                 log::info!(
                     "Selected GPU (passed configuration test): {} ({:?})",
